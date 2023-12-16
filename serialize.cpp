@@ -9,14 +9,13 @@ unsigned char *serializeNetJoin(struct NET_JOIN_PDU *toSerialize) {
   unsigned char *p = serialized;
 
   *p = toSerialize->type;
-  p += 2;
+  p += 1;
 
   memcpy(p, &toSerialize->src_address, sizeof(uint32_t));
   p += 4;
 
   memcpy(p, &toSerialize->src_port, sizeof(uint16_t));
   p += 2;
-
   *p = toSerialize->name_length;
   p++;
 
@@ -32,7 +31,7 @@ struct NET_JOIN_PDU *deserializeNetJoin(unsigned char *toDeserialize) {
   unsigned char *p = toDeserialize;
 
   deserialized->type = *p;
-  p += 2;
+  p += 1;
 
   memcpy(&deserialized->src_address, p, sizeof(uint32_t));
   p += 4;
@@ -56,7 +55,7 @@ unsigned char *serializeMsgSend(struct MSG_SEND_PDU *toSerialize) {
   unsigned char *p = serialized;
 
   *p = toSerialize->type;
-  p += 2;
+  p += 1;
 
   memcpy(p, &toSerialize->msg_length, sizeof(uint16_t));
   p += 2;
@@ -73,7 +72,7 @@ struct MSG_SEND_PDU *deserializeMsgSend(unsigned char *toDeserialize) {
   unsigned char *p = toDeserialize;
 
   deserialized->type = *p;
-  p += 2;
+  p += 1;
 
   memcpy(&deserialized->msg_length, p, sizeof(uint16_t));
   p += 2;
