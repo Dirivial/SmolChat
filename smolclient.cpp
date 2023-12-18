@@ -131,13 +131,13 @@ int main(int argc, char const *argv[]) {
         msg->type = NET_MSG_SEND;
         msg->msg_length = message.length();
 
-        msg->msg = (unsigned char *)malloc(sizeof(char) * message.length());
+        msg->msg = (unsigned char *)malloc(message.length());
         memcpy(msg->msg, message.c_str(), message.length());
 
-        unsigned char *serialized = serializeMsgSend(msg);
+        uint8_t *serialized = serializeMsgSend(msg);
 
-        if (send(client_fd, serialized, 1 + msg->msg_length + message.length(),
-                 0) <= 0) {
+        if (send(client_fd, serialized,
+                 sizeof(struct MSG_SEND_PDU) + message.length(), 0) <= 0) {
           perror("Error sending message to server");
         }
 
@@ -214,17 +214,39 @@ void *socketListener(int socket, struct sockaddr *serv_addr, WINDOW *chatWindow,
     if (pollFd.revents == POLLIN) {
       if ((valread = recv(client_fd, buffer, 1024, 0)) > 0) {
 
-        mutex.lock();
+        if (buffer[0] == NET_MSG_SEND) {
+          struct MSG_SEND_PDU *client_msg =
+              deserializeMsgSend((unsigned char *)buffer);
+          // fprintf(stdout, "Message: %s\n", client_msg->msg);
+          mutex.lock();
 
-        mvwprintw(chatWindow, lineHeight++, inputOffsetX, "%s\n", &buffer);
-        box(chatWindow, 0, 0);
-        wrefresh(chatWindow);
-        wmove(inputWindow, 1, inputOffsetX);
-        wrefresh(inputWindow);
+          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "%s\n",
+                    client_msg->msg);
+          box(chatWindow, 0, 0);
+          wrefresh(chatWindow);
+          wmove(inputWindow, 1, inputOffsetX);
+          wrefresh(inputWindow);
 
-        mutex.unlock();
+          mutex.unlock();
 
-        memset(buffer, 0, 1024);
+          memset(buffer, 0, 1024);
+        } else if (buffer[0] == NET_MSG_BROADCAST) {
+          struct MSG_BROADCAST_PDU *client_msg =
+              deserializeMsgBroadcast((uint8_t *)buffer);
+
+          mutex.lock();
+
+          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "(%s) %s: %s",
+                    client_msg->time, client_msg->name, client_msg->msg);
+          box(chatWindow, 0, 0);
+          wrefresh(chatWindow);
+          wmove(inputWindow, 1, inputOffsetX);
+          wrefresh(inputWindow);
+
+          mutex.unlock();
+
+          memset(buffer, 0, 1024);
+        }
       }
     }
   }

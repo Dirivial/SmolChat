@@ -10,6 +10,55 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+struct client {
+  int socket;
+  struct sockaddr_in address;
+  socklen_t addrlen;
+  int nameLength;
+  uint8_t *name;
+  int id; // When clients can change names
+};
+
+void printClientMessage(char *buffer) {
+
+  struct MSG_SEND_PDU *client_msg = deserializeMsgSend((uint8_t *)buffer);
+  fprintf(stdout, " :: '%s'\n", client_msg->msg);
+}
+
+void broadcastMessage(uint8_t *buffer, int *clientSockets, int maxClients) {
+  struct MSG_SEND_PDU *message = deserializeMsgSend(buffer);
+
+  struct MSG_BROADCAST_PDU *newMessage =
+      (struct MSG_BROADCAST_PDU *)malloc(sizeof(MSG_BROADCAST_PDU));
+
+  newMessage->type = NET_MSG_BROADCAST;
+  newMessage->msg_length = message->msg_length;
+  newMessage->msg = message->msg;
+  newMessage->name_length = 4;
+  newMessage->name = new uint8_t[newMessage->name_length]{'E', 'r', 'i', 'k'};
+  newMessage->time_length = 5;
+  newMessage->time =
+      new uint8_t[newMessage->time_length]{'1', '2', ':', '3', '4'};
+
+  uint8_t *serializedMessage = serializeMsgBroadcast(newMessage);
+  int sizeOfMessage = sizeof(struct MSG_BROADCAST_PDU) +
+                      newMessage->msg_length + newMessage->name_length +
+                      newMessage->time_length;
+
+  fprintf(stdout, "Broadcast message size: %d (%ld)\n", sizeOfMessage,
+          sizeof(struct MSG_BROADCAST_PDU));
+
+  // Send message to all clients
+  for (int j = 0; j < maxClients; j++) {
+    int aClient = clientSockets[j];
+    if (aClient != 0) {
+      if (send(aClient, serializedMessage, sizeOfMessage, 0) < 0) {
+        perror("Error sending message to client");
+      }
+    }
+  }
+}
+
 int main(int argc, char const *argv[]) {
 
   // Check for the correct number of arguments
@@ -154,26 +203,20 @@ int main(int argc, char const *argv[]) {
         }
 
         else if (valread > 0) {
+
+          fprintf(stdout, "%d bytes received -> ", valread);
+          // Handle message depending on type
           uint8_t type = buffer[0];
-          fprintf(stdout, "Received %d bytes containing a PDU of type %d\n",
-                  valread, type);
           switch (type) {
           case NET_JOIN:
-            fprintf(stdout, "Client %d sent a NET_JOIN PDU\n", i);
+            fprintf(stdout, "Client %d sent a NET_JOIN PDU?\n", i);
             break;
           case NET_MSG_SEND:
-            fprintf(stdout, "Client %d sent a MSG_SEND PDU\n", i);
-            // Set the string terminating NULL byte on the end of the data read
-            buffer[valread] = '\0';
-            // Send message to all other clients
-            for (int j = 0; j < maxClients; j++) {
-              int aClient = clientSockets[j];
-              if (aClient != 0) {
-                if (send(aClient, buffer, strlen(buffer), 0) < 0) {
-                  perror("Error sending message to client");
-                }
-              }
-            }
+            fprintf(stdout, "Client %d sent a MSG_SEND", i);
+
+            printClientMessage(buffer);
+            broadcastMessage((uint8_t *)buffer, clientSockets, maxClients);
+
             memset(buffer, 0, sizeof(buffer));
 
             break;
