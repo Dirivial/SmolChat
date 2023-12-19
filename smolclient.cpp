@@ -73,12 +73,18 @@ int main(int argc, char *argv[]) {
         std::cerr << "Unknown option: -" << static_cast<char>(optopt)
                   << std::endl;
       }
-      return 1;
+      exit(EXIT_FAILURE);
 
     default:
-      // Handle other cases
+      // I don't know how this could happen
       break;
     }
+  }
+
+  if (PORT == 0) {
+    fprintf(stderr,
+            "Currently a address & port number has to be supplied. Use -i\n");
+    exit(EXIT_FAILURE);
   }
 
   // Ncurses initialization
