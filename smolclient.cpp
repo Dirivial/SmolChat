@@ -21,14 +21,19 @@ static void finish(int sig);
 void setAddressAndPort(char *arg, char **IP, int *PORT);
 
 void *socketListener(uint8_t *username, int usernameLength,
-                     struct sockaddr *serv_addr, WINDOW *chatWindow,
-                     WINDOW *inputWindow);
+                     struct sockaddr *serv_addr);
 
 void randomNameGenerator(std::string *name);
+
+// Start index is the index of the first message to display
+void displayMessages(int inputOffsetX, int startIndex);
 
 int client_fd = 0;
 std::mutex mutex;
 std::vector<std::string> messages;
+std::thread listenerThread;
+WINDOW *inputWindow;
+WINDOW *chatWindow;
 
 int main(int argc, char *argv[]) {
 
@@ -102,10 +107,10 @@ int main(int argc, char *argv[]) {
   int startx = 0;
 
   // Chat window
-  WINDOW *chatWindow = newwin(starty, width, 0, 0);
+  chatWindow = newwin(starty, width, 0, 0);
 
   // Input window
-  WINDOW *inputWindow = newwin(height, width, starty, startx);
+  inputWindow = newwin(height, width, starty, startx);
   box(inputWindow, 0, 0);
 
   refresh();
@@ -129,9 +134,9 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  std::thread listenerThread =
+  listenerThread =
       std::thread(socketListener, (uint8_t *)username.data(), username.length(),
-                  (struct sockaddr *)&serv_addr, chatWindow, inputWindow);
+                  (struct sockaddr *)&serv_addr);
 
   listenerThread.detach();
 
@@ -240,9 +245,9 @@ void setAddressAndPort(char *arg, char **IP, int *PORT) {
 }
 
 void *socketListener(uint8_t *username, int usernameLength,
-                     struct sockaddr *serv_addr, WINDOW *chatWindow,
-                     WINDOW *inputWindow) {
-  // Draw window to avoid user thinking the window is frozen
+                     struct sockaddr *serv_addr) {
+  // Draw window to avoid user thinking the window is frozen incase it takes a
+  // while to connect
   mutex.lock();
   box(chatWindow, 0, 0);
   wrefresh(chatWindow);
@@ -259,7 +264,7 @@ void *socketListener(uint8_t *username, int usernameLength,
     return NULL;
   }
 
-  // Get welcom message from server
+  // Get welcome message from server
   valread = recv(client_fd, buffer, 1024, 0);
   buffer[valread] = '\0';
 
@@ -294,6 +299,8 @@ void *socketListener(uint8_t *username, int usernameLength,
   pollFd.fd = client_fd;
   pollFd.events = POLLIN;
 
+  // TODO -- Break out of this loop when the user wants to quit. (and wait for
+  // the thread to complete)
   while (1) {
 
     // Check if there are incoming messages
@@ -306,19 +313,18 @@ void *socketListener(uint8_t *username, int usernameLength,
     if (pollFd.revents == POLLIN) {
       if ((valread = recv(client_fd, buffer, 1024, 0)) > 0) {
 
+        // Buffer[0] contains the type of message
         if (buffer[0] == NET_MSG_SEND) {
           struct MSG_SEND_PDU *client_msg =
               deserializeMsgSend((unsigned char *)buffer);
-          // fprintf(stdout, "Message: %s\n", client_msg->msg);
-          mutex.lock();
 
+          mutex.lock();
           mvwprintw(chatWindow, lineHeight++, inputOffsetX, "%s\n",
                     client_msg->msg);
           box(chatWindow, 0, 0);
           wrefresh(chatWindow);
           wmove(inputWindow, 1, inputOffsetX);
           wrefresh(inputWindow);
-
           mutex.unlock();
 
           memset(buffer, 0, 1024);
@@ -328,8 +334,10 @@ void *socketListener(uint8_t *username, int usernameLength,
 
           mutex.lock();
 
-          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "(%s) %s: %s",
-                    client_msg->time, client_msg->name, client_msg->msg);
+          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "(%.*s) %.*s: %.*s",
+                    client_msg->time_length, client_msg->time,
+                    client_msg->name_length, client_msg->name,
+                    client_msg->msg_length, client_msg->msg);
           box(chatWindow, 0, 0);
           wrefresh(chatWindow);
           wmove(inputWindow, 1, inputOffsetX);
@@ -337,6 +345,38 @@ void *socketListener(uint8_t *username, int usernameLength,
 
           mutex.unlock();
 
+          memset(buffer, 0, 1024);
+        } else if (buffer[0] == NET_JOIN) {
+          struct NET_JOIN_PDU *client_msg =
+              deserializeNetJoin((unsigned char *)buffer);
+
+          mutex.lock();
+
+          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "%.*s has joined",
+                    client_msg->name_length, client_msg->name);
+          box(chatWindow, 0, 0);
+          wrefresh(chatWindow);
+          wmove(inputWindow, 1, inputOffsetX);
+          wrefresh(inputWindow);
+
+          mutex.unlock();
+          memset(buffer, 0, 1024);
+        } else if (buffer[0] == NET_LEAVE) {
+
+          struct NET_JOIN_PDU *client_msg =
+              deserializeNetJoin((unsigned char *)buffer);
+
+          mutex.lock();
+
+          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "%.*s has left",
+                    client_msg->name_length, client_msg->name,
+                    client_msg->name_length);
+          box(chatWindow, 0, 0);
+          wrefresh(chatWindow);
+          wmove(inputWindow, 1, inputOffsetX);
+          wrefresh(inputWindow);
+
+          mutex.unlock();
           memset(buffer, 0, 1024);
         }
       }

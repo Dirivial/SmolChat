@@ -13,6 +13,7 @@ enum : uint8_t {
   NET_MSG_SEND = 3,
   NET_MSG_RECV = 4,
   NET_MSG_BROADCAST = 5,
+  NET_LEAVE = 6,
 };
 
 struct NET_ALIVE_PDU {
