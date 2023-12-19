@@ -1,50 +1,35 @@
 #include "serialize.hpp"
 #include "pdu.hpp"
 
-unsigned char *serializeNetJoin(struct NET_JOIN_PDU *toSerialize) {
+unsigned char *serializeNetJoin(struct NET_JOIN_PDU *pdu) {
+  uint8_t *buffer =
+      (uint8_t *)malloc(1 + sizeof(pdu->name_length) + pdu->name_length);
+  buffer[0] = pdu->type;
 
-  unsigned char *serialized =
-      (unsigned char *)malloc(sizeof(struct NET_JOIN_PDU));
+  // Copy msg_length as a 16-bit value to the buffer (little-endian)
+  std::memcpy(buffer + 1, &pdu->name_length, sizeof(pdu->name_length));
 
-  unsigned char *p = serialized;
-
-  *p = toSerialize->type;
-  p += 1;
-
-  std::memcpy(p, &toSerialize->src_address, sizeof(uint32_t));
-  p += 4;
-
-  std::memcpy(p, &toSerialize->src_port, sizeof(uint16_t));
-  p += 2;
-  *p = toSerialize->name_length;
-  p++;
-
-  std::memcpy(p, &toSerialize->name, sizeof(uint32_t));
-
-  return serialized;
+  // Copy msg to the buffer
+  std::memcpy(buffer + 1 + sizeof(pdu->name_length), pdu->name,
+              pdu->name_length);
+  return buffer;
 }
 
-struct NET_JOIN_PDU *deserializeNetJoin(unsigned char *toDeserialize) {
+struct NET_JOIN_PDU *deserializeNetJoin(unsigned char *buffer) {
 
-  struct NET_JOIN_PDU *deserialized =
+  struct NET_JOIN_PDU *pdu =
       (struct NET_JOIN_PDU *)malloc(sizeof(struct NET_JOIN_PDU));
-  unsigned char *p = toDeserialize;
+  pdu->type = buffer[0];
 
-  deserialized->type = *p;
-  p += 1;
+  // Extract msg_length from the buffer (little-endian)
+  std::memcpy(&pdu->name_length, buffer + 1, sizeof(pdu->name_length));
 
-  std::memcpy(&deserialized->src_address, p, sizeof(uint32_t));
-  p += 4;
+  // Allocate memory for msg and copy it from the buffer
+  pdu->name = (uint8_t *)std::malloc(sizeof(uint8_t) * pdu->name_length);
+  std::memcpy(pdu->name, buffer + 1 + sizeof(pdu->name_length),
+              pdu->name_length);
 
-  std::memcpy(&deserialized->src_port, p, sizeof(uint16_t));
-  p += 2;
-
-  deserialized->name_length = *p;
-  p++;
-
-  std::memcpy(&deserialized->name, p, sizeof(uint32_t));
-
-  return deserialized;
+  return pdu;
 }
 
 uint8_t *serializeMsgSend(struct MSG_SEND_PDU *pdu) {

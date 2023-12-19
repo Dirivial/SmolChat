@@ -3,10 +3,12 @@
 #include <arpa/inet.h>
 #include <curses.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <mutex>
 #include <ncurses.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <random>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
@@ -15,19 +17,65 @@
 #include <unistd.h>
 
 static void finish(int sig);
-void *socketListener(int socket, struct sockaddr *serv_addr, WINDOW *window,
+
+void setAddressAndPort(char *arg, char **IP, int *PORT);
+
+void *socketListener(uint8_t *username, int usernameLength,
+                     struct sockaddr *serv_addr, WINDOW *chatWindow,
                      WINDOW *inputWindow);
 
+void randomNameGenerator(std::string *name);
+
 int client_fd = 0;
-int *y = 0;
 std::mutex mutex;
+std::vector<std::string> messages;
 
-int main(int argc, char const *argv[]) {
+int main(int argc, char *argv[]) {
 
-  // Check for the correct number of arguments
-  if (argc != 3) {
-    fprintf(stderr, "Usage: %s <ip> <port>\n", argv[0]);
-    exit(EXIT_FAILURE);
+  char *IP = NULL;
+  int PORT = 0;
+
+  // Initialize username to something and overwrite it later if needed
+  std::string username = "";
+  randomNameGenerator(&username);
+
+  // Define the available options
+  const char *shortOptions =
+      "u:i:p:h"; // "u:" indicates that -u requires an argument
+
+  // Use getopt to parse the command-line options
+  int opt;
+  while ((opt = getopt(argc, argv, shortOptions)) != -1) {
+    switch (opt) {
+    case 'i':
+      // optarg contains the argument to the -i option
+      setAddressAndPort(optarg, &IP, &PORT);
+      break;
+    case 'u':
+      // optarg contains the argument to the -u option
+      username = optarg;
+      break;
+    case 'h':
+      // Print help
+      std::cout << "Help" << std::endl;
+      break;
+
+    case '?':
+      // Handle unknown options or missing arguments
+      if (optopt == 'u') {
+        std::cerr << "Option -u requires an argument." << std::endl;
+      } else if (optopt == 'i') {
+        std::cerr << "Option -i requires an argument." << std::endl;
+      } else {
+        std::cerr << "Unknown option: -" << static_cast<char>(optopt)
+                  << std::endl;
+      }
+      return 1;
+
+    default:
+      // Handle other cases
+      break;
+    }
   }
 
   // Ncurses initialization
@@ -54,27 +102,14 @@ int main(int argc, char const *argv[]) {
   refresh();
   wrefresh(inputWindow);
   wrefresh(chatWindow);
-  char *IP = (char *)argv[1];
-  int PORT = atoi(argv[2]);
 
-  int status;
+  // Socket handling
   struct sockaddr_in serv_addr;
 
   if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     printf("\n Socket creation error \n");
     return -1;
   }
-  // Set socket to nonblocking
-  /*
-  int flags = fcntl(client_fd, F_GETFL, 0);
-  flags = flags & ~O_NONBLOCK;
-  int success = fcntl(client_fd, F_SETFL, flags);
-
-  if (success == -1) {
-    perror("Error setting socket to blocking");
-    return -1;
-  }
-  */
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_port = htons(PORT);
 
@@ -85,18 +120,20 @@ int main(int argc, char const *argv[]) {
     return -1;
   }
 
-  std::string message = "";
-  int x = 0;
   std::thread listenerThread =
-      std::thread(socketListener, client_fd, (struct sockaddr *)&serv_addr,
-                  chatWindow, inputWindow);
+      std::thread(socketListener, (uint8_t *)username.data(), username.length(),
+                  (struct sockaddr *)&serv_addr, chatWindow, inputWindow);
 
   listenerThread.detach();
+
   // Move cursor to the input window
   mutex.lock();
   wmove(inputWindow, 1, inputOffsetX);
   wrefresh(inputWindow);
   mutex.unlock();
+
+  std::string message = "";
+  int x = 0;
 
   for (;;) {
     int c = getch(); /* refresh, accept single keystroke of input */
@@ -104,9 +141,10 @@ int main(int argc, char const *argv[]) {
     if (c != ERR) {
 
       mutex.lock();
+
       if (c == KEY_BACKSPACE || c == 127) {
-        // Delete the last character in the input buffer
         if (x > 0) {
+          // Delete the last character in the input buffer
           message.pop_back();
           mvwaddch(inputWindow, 1, inputOffsetX + x - 1, ' ');
           wmove(inputWindow, 1, inputOffsetX + x - 1);
@@ -154,15 +192,41 @@ int main(int argc, char const *argv[]) {
         wrefresh(inputWindow);
         mutex.unlock();
       }
-    } else {
-      // Check if data has been fetched
     }
   }
 
   return 0;
 }
+void randomNameGenerator(std::string *name) {
 
-void *socketListener(int socket, struct sockaddr *serv_addr, WINDOW *chatWindow,
+  // Initialize random number generator
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int> distribution(
+      1, 100); // Adjust the range as needed
+
+  // Generate a random number
+  int randomNumber = distribution(gen);
+
+  *name = "default-user-" + std::to_string(randomNumber);
+}
+
+void setAddressAndPort(char *arg, char **IP, int *PORT) {
+  char *token = strtok(arg, ":");
+  int i = 0;
+  while (token != NULL) {
+    if (i == 0) {
+      *IP = token;
+    } else if (i == 1) {
+      *PORT = atoi(token);
+    }
+    token = strtok(NULL, ":");
+    i++;
+  }
+}
+
+void *socketListener(uint8_t *username, int usernameLength,
+                     struct sockaddr *serv_addr, WINDOW *chatWindow,
                      WINDOW *inputWindow) {
   // Draw window to avoid user thinking the window is frozen
   mutex.lock();
@@ -196,6 +260,20 @@ void *socketListener(int socket, struct sockaddr *serv_addr, WINDOW *chatWindow,
 
   // Clear buffer
   memset(buffer, 0, 1024);
+
+  // Send client info to server
+  struct NET_JOIN_PDU *netJoinPdu =
+      (struct NET_JOIN_PDU *)malloc(sizeof(struct NET_JOIN_PDU));
+  netJoinPdu->type = NET_JOIN;
+  netJoinPdu->name = username;
+  netJoinPdu->name_length = usernameLength;
+  uint8_t *serializedNetJoin = serializeNetJoin(netJoinPdu);
+  // Send information about client
+  if (send(client_fd, serializedNetJoin,
+           sizeof(struct NET_JOIN_PDU) + netJoinPdu->name_length, 0) < 0) {
+    perror("Error on sending client info\n");
+    return NULL;
+  }
 
   // Construct the pollfd struct to check for incoming messages
   struct pollfd pollFd = {0};
