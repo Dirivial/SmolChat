@@ -57,7 +57,10 @@ int main(int argc, char *argv[]) {
       break;
     case 'h':
       // Print help
-      std::cout << "Help" << std::endl;
+      std::cout << " ========== Help ========== " << std::endl;
+      std::cout << "Usage: " << argv[0] << " -i <IP>:<PORT> -u <username>\n"
+                << std::endl;
+      exit(EXIT_SUCCESS);
       break;
 
     case '?':
@@ -213,16 +216,21 @@ void randomNameGenerator(std::string *name) {
 
 void setAddressAndPort(char *arg, char **IP, int *PORT) {
   char *token = strtok(arg, ":");
-  int i = 0;
-  while (token != NULL) {
-    if (i == 0) {
-      *IP = token;
-    } else if (i == 1) {
-      *PORT = atoi(token);
-    }
-    token = strtok(NULL, ":");
-    i++;
+
+  // First get the address
+  if (token == NULL) {
+    fprintf(stderr, "Invalid address. Format: 127.0.0.1:<PORT>\n");
+    exit(EXIT_FAILURE);
   }
+  *IP = token;
+
+  // Now get the port
+  token = strtok(NULL, ":");
+  if (token == NULL) {
+    fprintf(stderr, "Invalid port number. Format: <ADDRESS>:8080\n");
+    exit(EXIT_FAILURE);
+  }
+  *PORT = atoi(token);
 }
 
 void *socketListener(uint8_t *username, int usernameLength,
