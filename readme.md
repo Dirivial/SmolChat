@@ -12,4 +12,17 @@ fairly C-like.
 
 I have split the chat application into two major parts, the server and the client.
 
+## Compiling
+
+```bash
+dirivial:~$ git clone https://github.com/dirivial/SmolChat
+dirivial:~$ cd SmolChat/
+dirivial:~/SmolChat$ make
+dirivial:~/SmolChat$ ./SmolClient -u jeff -i 127.0.0.1:8080
+```
+
+!Note: At least for now you need to specify a port number
+!!Note: The server is compiled to 'SmolServer' and requires you to
+put a port number, say 8080.
+
 ![example](screenshots/1.png)
