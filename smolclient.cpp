@@ -12,21 +12,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <strstream>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
-
-static void finish(int sig);
-
-void setAddressAndPort(char *arg, char **IP, int *PORT);
-
-void *socketListener(uint8_t *username, int usernameLength,
-                     struct sockaddr *serv_addr);
-
-void randomNameGenerator(std::string *name);
-
-// Start index is the index of the first message to display
-void displayMessages(int inputOffsetX, int startIndex);
 
 int client_fd = 0;
 std::mutex mutex;
@@ -34,6 +23,24 @@ std::vector<std::string> messages;
 std::thread listenerThread;
 WINDOW *inputWindow;
 WINDOW *chatWindow;
+bool running = true;
+
+// Signal handlers
+void handleSigTerm(int signum);
+void handleCtrlC(int signum);
+void handleResize(int signum);
+
+// Helpers
+void setAddressAndPort(char *arg, char **IP, int *PORT);
+void randomNameGenerator(std::string *name);
+static void finish(int sig);
+
+// Thread function
+void *socketListener(uint8_t *username, int usernameLength,
+                     struct sockaddr *serv_addr);
+
+// Start index is the index of the first message to display
+void displayMessages(int inputOffsetX, int startIndex);
 
 int main(int argc, char *argv[]) {
 
@@ -92,13 +99,29 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  // Ncurses initialization
-  (void)signal(SIGINT, finish); /* arrange interrupts to terminate */
+  // Socket handling
+  struct sockaddr_in serv_addr;
 
+  if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+    printf("\n Socket creation error \n");
+    return -1;
+  }
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_port = htons(PORT);
+
+  // Convert IPv4 and IPv6 addresses from text to binary
+  // form
+  if (inet_pton(AF_INET, IP, &serv_addr.sin_addr) <= 0) {
+    printf("\nInvalid address/ Address not supported \n");
+    return -1;
+  }
+  /*
+      ================== NCURSES ==================
+  */
   (void)initscr();      /* initialize the curses library */
   keypad(stdscr, TRUE); /* enable keyboard mapping */
-  (void)cbreak();       /* take input chars one at a time, no wait for \n */
-  (void)noecho();       /* echo input - in color */
+  (void)raw();
+  (void)noecho(); /* echo input - in color */
 
   // Windows init
   int inputOffsetX = 3;
@@ -117,23 +140,6 @@ int main(int argc, char *argv[]) {
   wrefresh(inputWindow);
   wrefresh(chatWindow);
 
-  // Socket handling
-  struct sockaddr_in serv_addr;
-
-  if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-    printf("\n Socket creation error \n");
-    return -1;
-  }
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_port = htons(PORT);
-
-  // Convert IPv4 and IPv6 addresses from text to binary
-  // form
-  if (inet_pton(AF_INET, IP, &serv_addr.sin_addr) <= 0) {
-    printf("\nInvalid address/ Address not supported \n");
-    return -1;
-  }
-
   listenerThread =
       std::thread(socketListener, (uint8_t *)username.data(), username.length(),
                   (struct sockaddr *)&serv_addr);
@@ -149,7 +155,7 @@ int main(int argc, char *argv[]) {
   std::string message = "";
   int x = 0;
 
-  for (;;) {
+  while (1) {
     int c = getch(); /* refresh, accept single keystroke of input */
 
     if (c != ERR) {
@@ -198,11 +204,18 @@ int main(int argc, char *argv[]) {
         free(msg->msg);
         free(msg);
 
+      } else if (c == KEY_RESIZE) {
+        handleResize(SIGWINCH);
+      } else if (c == SIGQUIT) {
+        handleCtrlC(SIGINT);
+
       } else {
+        wclear(inputWindow);
         message.push_back(c);
-        mvwaddch(inputWindow, 1, inputOffsetX + x, c);
+        mvwprintw(inputWindow, 1, inputOffsetX, "%s", message.c_str());
         x++;
 
+        box(inputWindow, 0, 0);
         wrefresh(inputWindow);
         mutex.unlock();
       }
@@ -255,7 +268,6 @@ void *socketListener(uint8_t *username, int usernameLength,
 
   int valread = 0;
   char buffer[1024];
-  int lineHeight = 1;
   int inputOffsetX = 3;
 
   // Connect to the server
@@ -266,16 +278,14 @@ void *socketListener(uint8_t *username, int usernameLength,
 
   // Get welcome message from server
   valread = recv(client_fd, buffer, 1024, 0);
+  if (valread < 0) {
+    perror("Error on receiving welcome message\n");
+    return NULL;
+  }
   buffer[valread] = '\0';
 
-  // Print welcome message to the chat window
-  mutex.lock();
-  mvwprintw(chatWindow, lineHeight++, 3, "%s\n", buffer);
-  box(chatWindow, 0, 0);
-  wrefresh(chatWindow);
-  wmove(inputWindow, 1, inputOffsetX);
-  wrefresh(inputWindow);
-  mutex.unlock();
+  messages.push_back(buffer);
+  displayMessages(inputOffsetX, 0);
 
   // Clear buffer
   memset(buffer, 0, 1024);
@@ -299,9 +309,7 @@ void *socketListener(uint8_t *username, int usernameLength,
   pollFd.fd = client_fd;
   pollFd.events = POLLIN;
 
-  // TODO -- Break out of this loop when the user wants to quit. (and wait for
-  // the thread to complete)
-  while (1) {
+  while (running) {
 
     // Check if there are incoming messages
     valread = poll(&pollFd, 1, 1);
@@ -318,70 +326,53 @@ void *socketListener(uint8_t *username, int usernameLength,
           struct MSG_SEND_PDU *client_msg =
               deserializeMsgSend((unsigned char *)buffer);
 
-          mutex.lock();
-          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "%s\n",
-                    client_msg->msg);
-          box(chatWindow, 0, 0);
-          wrefresh(chatWindow);
-          wmove(inputWindow, 1, inputOffsetX);
-          wrefresh(inputWindow);
-          mutex.unlock();
+          std::string message = "";
+          message.append((char *)client_msg->msg, client_msg->msg_length);
+          messages.insert(messages.begin(), message);
 
           memset(buffer, 0, 1024);
         } else if (buffer[0] == NET_MSG_BROADCAST) {
           struct MSG_BROADCAST_PDU *client_msg =
               deserializeMsgBroadcast((uint8_t *)buffer);
+          std::string message = "";
+          message.append((char *)client_msg->time, client_msg->time_length);
+          message.append(" ");
+          message.append((char *)client_msg->name, client_msg->name_length);
+          message.append(": ");
+          message.append((char *)client_msg->msg, client_msg->msg_length);
+          messages.insert(messages.begin(), message);
 
-          mutex.lock();
-
-          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "(%.*s) %.*s: %.*s",
-                    client_msg->time_length, client_msg->time,
-                    client_msg->name_length, client_msg->name,
-                    client_msg->msg_length, client_msg->msg);
-          box(chatWindow, 0, 0);
-          wrefresh(chatWindow);
-          wmove(inputWindow, 1, inputOffsetX);
-          wrefresh(inputWindow);
-
-          mutex.unlock();
+          displayMessages(inputOffsetX, 0);
 
           memset(buffer, 0, 1024);
         } else if (buffer[0] == NET_JOIN) {
           struct NET_JOIN_PDU *client_msg =
               deserializeNetJoin((unsigned char *)buffer);
 
-          mutex.lock();
+          std::string message = "";
+          message.append((char *)client_msg->name, client_msg->name_length);
+          message.append(" has joined");
+          messages.insert(messages.begin(), message);
 
-          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "%.*s has joined",
-                    client_msg->name_length, client_msg->name);
-          box(chatWindow, 0, 0);
-          wrefresh(chatWindow);
-          wmove(inputWindow, 1, inputOffsetX);
-          wrefresh(inputWindow);
-
-          mutex.unlock();
+          displayMessages(inputOffsetX, 0);
           memset(buffer, 0, 1024);
         } else if (buffer[0] == NET_LEAVE) {
 
           struct NET_JOIN_PDU *client_msg =
               deserializeNetJoin((unsigned char *)buffer);
 
-          mutex.lock();
+          std::string message = "";
+          message.append((char *)client_msg->name, client_msg->name_length);
+          message.append(" has left");
+          messages.insert(messages.begin(), message);
 
-          mvwprintw(chatWindow, lineHeight++, inputOffsetX, "%.*s has left",
-                    client_msg->name_length, client_msg->name,
-                    client_msg->name_length);
-          box(chatWindow, 0, 0);
-          wrefresh(chatWindow);
-          wmove(inputWindow, 1, inputOffsetX);
-          wrefresh(inputWindow);
-
-          mutex.unlock();
+          displayMessages(inputOffsetX, 0);
           memset(buffer, 0, 1024);
         }
       }
     }
   }
+  std::this_thread::sleep_for(std::chrono::seconds(1));
   return NULL;
 }
 
@@ -398,4 +389,96 @@ static void finish(int sig) {
     perror("Error closing client socket");
   }
   exit(0);
+}
+
+// Function to handle SIGINT (Ctrl+C)
+void handleCtrlC(int signum) {
+
+  // Wait for listener thread to finish
+  if (listenerThread.joinable()) {
+    running = false;
+    listenerThread.join();
+  } else {
+    fprintf(stderr, "Thread not joinable, continuing cleanup\n");
+  }
+
+  endwin(); // End ncurses mode before exiting
+  std::cout << "Received SIGINT. Cleaning up and exiting." << std::endl;
+  std::cout << "Done." << std::endl;
+  exit(signum);
+}
+
+// Function to handle SIGWINCH (Window resize)
+void handleResize(int signum) {
+  endwin();
+  clear();   // Do NOT swap this and
+  refresh(); // this... it was a pain to debug
+
+  // Redraw the windows
+  int maxY, maxX;
+  getmaxyx(stdscr, maxY, maxX);
+
+  // Recreate and redraw the chat window
+  wresize(chatWindow, maxY - 3, maxX);
+  mvwin(chatWindow, 0, 0);
+  wclear(chatWindow);
+  box(chatWindow, 0, 0);
+  wrefresh(chatWindow);
+
+  // Draw chat messages
+  displayMessages(3, 0);
+
+  // Recreate and redraw the input window
+  wresize(inputWindow, 3, maxX);
+  mvwin(inputWindow, maxY - 3, 0);
+  wclear(inputWindow);
+  box(inputWindow, 0, 0);
+  wmove(inputWindow, 1, 3);
+  wrefresh(inputWindow);
+
+  mutex.unlock();
+}
+
+// Function to handle SIGTERM (Termination signal)
+void handleSigTerm(int signum) {
+
+  // Wait for listener thread to finish
+  if (listenerThread.joinable()) {
+    running = false;
+    listenerThread.join();
+  } else {
+    fprintf(stderr, "Thread not joinable, continuing cleanup\n");
+  }
+
+  endwin(); // End ncurses mode before exiting
+  std::cout << "Received SIGTERM. Cleaning up and exiting." << std::endl;
+  std::cout << "Done." << std::endl;
+  exit(signum);
+}
+
+void displayMessages(int inputOffsetX, int startIndex) {
+
+  int maxY, maxX;
+  getmaxyx(chatWindow, maxY, maxX);
+  // Clear the chat window
+  wclear(chatWindow);
+  box(chatWindow, 0, 0);
+  // Display messages
+  int msgIndex = startIndex;
+  for (int y = 2; y < maxY; y++) {
+    if (messages.size() == msgIndex) {
+      break;
+    }
+    // TODO: Account for messages that are longer than the window width
+    mvwprintw(chatWindow, maxY - y, inputOffsetX, "%s",
+              messages.at(msgIndex).c_str());
+    msgIndex++;
+  }
+
+  // Redraw the windows
+  wrefresh(chatWindow);
+
+  // Move cursors to the input window
+  wmove(inputWindow, 1, inputOffsetX);
+  wrefresh(inputWindow);
 }
