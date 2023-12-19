@@ -10,7 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-struct client {
+struct Client {
   int socket;
   struct sockaddr_in address;
   socklen_t addrlen;
@@ -25,7 +25,18 @@ void printClientMessage(char *buffer) {
   fprintf(stdout, " :: '%s'\n", client_msg->msg);
 }
 
-void broadcastMessage(uint8_t *buffer, int *clientSockets, int maxClients) {
+void addClient(uint8_t *buffer, struct Client *clients, int clientIndex) {
+  struct NET_JOIN_PDU *netJoin = deserializeNetJoin(buffer);
+
+  clients[clientIndex].name = netJoin->name;
+  clients[clientIndex].nameLength = netJoin->name_length;
+
+  fprintf(stderr, "A Client %d with name %s has joined\n", clientIndex,
+          netJoin->name);
+}
+
+void broadcastMessage(uint8_t *buffer, struct Client *clients, int clientIndex,
+                      int maxClients) {
   struct MSG_SEND_PDU *message = deserializeMsgSend(buffer);
 
   struct MSG_BROADCAST_PDU *newMessage =
@@ -34,8 +45,8 @@ void broadcastMessage(uint8_t *buffer, int *clientSockets, int maxClients) {
   newMessage->type = NET_MSG_BROADCAST;
   newMessage->msg_length = message->msg_length;
   newMessage->msg = message->msg;
-  newMessage->name_length = 4;
-  newMessage->name = new uint8_t[newMessage->name_length]{'E', 'r', 'i', 'k'};
+  newMessage->name_length = clients[clientIndex].nameLength;
+  newMessage->name = clients[clientIndex].name;
   newMessage->time_length = 5;
   newMessage->time =
       new uint8_t[newMessage->time_length]{'1', '2', ':', '3', '4'};
@@ -50,7 +61,7 @@ void broadcastMessage(uint8_t *buffer, int *clientSockets, int maxClients) {
 
   // Send message to all clients
   for (int j = 0; j < maxClients; j++) {
-    int aClient = clientSockets[j];
+    int aClient = clients[j].socket;
     if (aClient != 0) {
       if (send(aClient, serializedMessage, sizeOfMessage, 0) < 0) {
         perror("Error sending message to client");
@@ -69,7 +80,8 @@ int main(int argc, char const *argv[]) {
 
   int PORT = atoi(argv[1]);
   int maxClients = 30;
-  int clientSockets[maxClients];
+  struct Client *clients =
+      (struct Client *)std::malloc(sizeof(struct Client) * maxClients);
   int valread;
 
   int serverSocket;
@@ -80,7 +92,7 @@ int main(int argc, char const *argv[]) {
 
   // Initialize client sockets to 0
   for (int i = 0; i < maxClients; i++) {
-    clientSockets[i] = 0;
+    clients[i].socket = 0;
   }
 
   // Creating socket file descriptor
@@ -127,7 +139,7 @@ int main(int argc, char const *argv[]) {
     // Add child sockets to the set
     for (int i = 0; i < maxClients; i++) {
 
-      int socket = clientSockets[i];
+      int socket = clients[i].socket;
 
       // If the socket is valid, add it to the set
       if (socket > 0) {
@@ -171,8 +183,8 @@ int main(int argc, char const *argv[]) {
       for (int i = 0; i < maxClients; i++) {
 
         // If position is empty, insert the socket
-        if (clientSockets[i] == 0) {
-          clientSockets[i] = clientSocket;
+        if (clients[i].socket == 0) {
+          clients[i].socket = clientSocket;
           fprintf(stdout, "Added client to active connections\n");
           break;
         }
@@ -182,7 +194,7 @@ int main(int argc, char const *argv[]) {
     // Check data from active connections and handle accordingly
     for (int i = 0; i < maxClients; i++) {
 
-      int clientSocket = clientSockets[i];
+      int clientSocket = clients[i].socket;
 
       if (FD_ISSET(clientSocket, &readSet)) {
 
@@ -199,7 +211,7 @@ int main(int argc, char const *argv[]) {
 
           // Close the socket and mark as 0 in list for reuse
           close(clientSocket);
-          clientSockets[i] = 0;
+          clients[i].socket = 0;
         }
 
         else if (valread > 0) {
@@ -209,13 +221,16 @@ int main(int argc, char const *argv[]) {
           uint8_t type = buffer[0];
           switch (type) {
           case NET_JOIN:
-            fprintf(stdout, "Client %d sent a NET_JOIN PDU?\n", i);
+            fprintf(stdout, "Client %d sent a NET_JOIN PDU\n", i);
+
+            addClient((uint8_t *)buffer, clients, i);
+            memset(buffer, 0, sizeof(buffer));
             break;
           case NET_MSG_SEND:
             fprintf(stdout, "Client %d sent a MSG_SEND", i);
 
             printClientMessage(buffer);
-            broadcastMessage((uint8_t *)buffer, clientSockets, maxClients);
+            broadcastMessage((uint8_t *)buffer, clients, i, maxClients);
 
             memset(buffer, 0, sizeof(buffer));
 

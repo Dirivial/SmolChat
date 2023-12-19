@@ -21,8 +21,6 @@ struct NET_ALIVE_PDU {
 
 struct NET_JOIN_PDU {
   uint8_t type;
-  uint32_t src_address;
-  uint16_t src_port;
   uint8_t name_length;
   uint8_t *name;
 };
