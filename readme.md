@@ -12,4 +12,4 @@ fairly C-like.
 
 I have split the chat application into two major parts, the server and the client.
 
-TODO: Add a short video on how the program works
+![example](screenshots/1.png)
