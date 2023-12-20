@@ -40,6 +40,7 @@ void *socketListener(uint8_t *username, int usernameLength,
 
 // Start index is the index of the first message to display
 void displayMessages(int inputOffsetX, int startIndex);
+void displayInput(int inputOffsetX, int cursorIndex, std::string message);
 
 int main(int argc, char *argv[]) {
 
@@ -169,8 +170,7 @@ int main(int argc, char *argv[]) {
           wmove(inputWindow, 1, inputOffsetX + x - 1);
           x -= 1;
         }
-
-        wrefresh(inputWindow);
+        displayInput(inputOffsetX, x, message);
         mutex.unlock();
       } else if (c == '\n' || c == '\r') {
 
@@ -209,13 +209,10 @@ int main(int argc, char *argv[]) {
         handleCtrlC(SIGINT);
 
       } else {
-        wclear(inputWindow);
         message.push_back(c);
-        mvwprintw(inputWindow, 1, inputOffsetX, "%s", message.c_str());
         x++;
+        displayInput(inputOffsetX, x, message);
 
-        box(inputWindow, 0, 0);
-        wrefresh(inputWindow);
         mutex.unlock();
       }
     }
@@ -480,5 +477,19 @@ void displayMessages(int inputOffsetX, int startIndex) {
 
   // Move cursors to the input window
   wmove(inputWindow, 1, inputOffsetX);
+  wrefresh(inputWindow);
+}
+
+void displayInput(int inputOffsetX, int cursorIndex, std::string message) {
+  int maxY, maxX;
+  getmaxyx(inputWindow, maxY, maxX);
+  maxX -= inputOffsetX * 2;
+
+  if (message.length() < maxX) {
+    mvwprintw(inputWindow, 1, inputOffsetX, "%s", message.c_str());
+  } else {
+    mvwprintw(inputWindow, 1, inputOffsetX, "%s",
+              message.substr(message.length() - maxX).c_str());
+  }
   wrefresh(inputWindow);
 }
