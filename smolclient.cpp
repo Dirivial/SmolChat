@@ -468,7 +468,8 @@ void displayMessages(int inputOffsetX, int startIndex) {
     if (messages.size() == msgIndex) {
       break;
     }
-    // TODO: Account for messages that are longer than the window width
+    int numLines = messages.at(msgIndex).length() / maxX;
+    y += numLines;
     mvwprintw(chatWindow, maxY - y, inputOffsetX, "%s",
               messages.at(msgIndex).c_str());
     msgIndex++;
