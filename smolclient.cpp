@@ -207,9 +207,28 @@ int main(int argc, char *argv[]) {
         handleResize(SIGWINCH);
       } else if (c == SIGQUIT) {
         handleCtrlC(SIGINT);
+      } else if (c == KEY_RIGHT) {
+        if (x < message.length()) {
+          x++;
+          displayInput(inputOffsetX, x, message);
+        }
+        mutex.unlock();
+      } else if (c == KEY_LEFT) {
+        if (x > 0) {
+          x--;
+          displayInput(inputOffsetX, x, message);
+        }
+        mutex.unlock();
+      } else if (c == KEY_DC) {
+        // Delete the character under the cursor
+        if (x < message.length()) {
+          message.erase(x, 1);
+          displayInput(inputOffsetX, x, message);
+        }
 
+        mutex.unlock();
       } else {
-        message.push_back(c);
+        message.insert(x, std::string(1, static_cast<char>(c)));
         x++;
         displayInput(inputOffsetX, x, message);
 
@@ -485,11 +504,29 @@ void displayInput(int inputOffsetX, int cursorIndex, std::string message) {
   getmaxyx(inputWindow, maxY, maxX);
   maxX -= inputOffsetX * 2;
 
+  wclear(inputWindow);
   if (message.length() < maxX) {
     mvwprintw(inputWindow, 1, inputOffsetX, "%s", message.c_str());
+    wmove(inputWindow, 1, inputOffsetX + (cursorIndex));
   } else {
+    // The message is longer than the input window
+    int windowRadius = maxX / 2;
+    int startIndex = 0;
+    if (cursorIndex + windowRadius >= message.length()) {
+      // Display the end of the message
+      startIndex = message.length() - maxX;
+    } else if (cursorIndex - windowRadius <= 0) {
+      // Display the beginning of the message
+      startIndex = 0;
+    } else {
+      // Display the middle of the message
+      startIndex = cursorIndex - windowRadius;
+    }
+
     mvwprintw(inputWindow, 1, inputOffsetX, "%s",
-              message.substr(message.length() - maxX).c_str());
+              message.substr(startIndex, maxX).c_str());
+    wmove(inputWindow, 1, inputOffsetX + (cursorIndex)-startIndex);
   }
+  box(inputWindow, 0, 0);
   wrefresh(inputWindow);
 }
