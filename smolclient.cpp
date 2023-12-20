@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
-#include <strstream>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>

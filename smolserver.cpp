@@ -5,7 +5,6 @@
 #include <ctime>
 #include <iomanip>
 #include <netinet/in.h>
-#include <pthread.h>
 #include <sstream>
 #include <stdio.h>
 #include <stdlib.h>
