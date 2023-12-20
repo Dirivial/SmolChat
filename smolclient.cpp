@@ -165,12 +165,10 @@ int main(int argc, char *argv[]) {
       if (c == KEY_BACKSPACE || c == 127) {
         if (x > 0) {
           // Delete the last character in the input buffer
-          message.pop_back();
-          mvwaddch(inputWindow, 1, inputOffsetX + x - 1, ' ');
-          wmove(inputWindow, 1, inputOffsetX + x - 1);
           x -= 1;
+          message.erase(x, 1);
+          displayInput(inputOffsetX, x, message);
         }
-        displayInput(inputOffsetX, x, message);
         mutex.unlock();
       } else if (c == '\n' || c == '\r') {
 
